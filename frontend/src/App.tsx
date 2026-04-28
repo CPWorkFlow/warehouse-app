@@ -45,6 +45,7 @@ function App() {
   const [quantity, setQuantity] = useState(0);
   const [listed, setListed] = useState(false);
   const [date, setDate] = useState("");
+  const [showAddForm, setShowAddForm] = useState(false);
 
   // Totals
   const [totalQuantity, setTotalQuantity] = useState(0);
@@ -130,7 +131,7 @@ function App() {
   };
 
   // Add product
-  const addProduct = (e: React.FormEvent) => {
+  const addProduct = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     const newItem: InventoryItem = {
       area,
@@ -161,10 +162,19 @@ function App() {
         setCompany("");
         setListed(false);
         setDate("");
-        areaRef.current?.focus();
+
+        setShowAddForm(false);
+
+       // areaRef.current?.focus();
       });
   };
-
+<button
+  type="button"
+  className="primary-button"
+  onClick={() => setShowAddForm(true)}
+>
+  + Add Item
+</button>
   // Inline edit
   const handleEdit = (id: number, field: keyof InventoryItem, value: any) => {
     setInventory((prev) =>
@@ -250,8 +260,36 @@ function App() {
         style={{ marginBottom: "1rem" }}
       />
 
+      <div className="page-header">
+  <div>
+    <h1>Inventory Manager</h1>
+    <p>Track, search, and manage warehouse stock</p>
+  </div>
+
+<button
+  type="button"
+  className="primary-button"
+  onClick={() => setShowAddForm(true)}
+>
+  + Add Item
+</button>
+</div>
       {/* Add Product Form */}
-      <form onSubmit={addProduct} style={{ marginBottom: "2rem" }}>
+      {showAddForm && (
+  <div className="drawer-backdrop">
+    <div className="drawer">
+      <div className="drawer-header">
+        <h2>Add Item</h2>
+        <button
+          type="button"
+          className="drawer-close"
+          onClick={() => setShowAddForm(false)}
+        >
+          Great Job!
+        </button>
+      </div>
+      
+      <form onSubmit={addProduct} className="drawer-form">
         {[
           { placeholder: "Area", value: area, setValue: setArea, ref: areaRef, required: true },
           { placeholder: "Shelf (optional)", value: shelf, setValue: setShelf, ref: shelfRef },
@@ -302,6 +340,9 @@ function App() {
         />
         <button type="submit">Add Product</button>
       </form>
+    </div>
+  </div>
+)}
 
       {/* Search */}
       <div style={{ marginBottom: "1rem" }}>
