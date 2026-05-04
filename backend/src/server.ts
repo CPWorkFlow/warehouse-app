@@ -25,34 +25,61 @@ const upload = multer({ dest: "uploads/" });
 
 // --- Database ---
 let db: Database<sqlite3.Database, sqlite3.Statement>;
+async function addColumnIfMissing(
+  tableName: string,
+  columnName: string,
+  columnType: string
+) {
+  const columns = await db.all(`PRAGMA table_info(${tableName})`);
+  const exists = columns.some((column) => column.name === columnName);
 
+  if (!exists) {
+    await db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`);
+    console.log(`Added column: ${columnName}`);
+  }
+}
 async function initDB() {
   db = await open({
     filename: dbPath,
     driver: sqlite3.Database,
   });
 
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS inventory (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      area TEXT,
-      shelf TEXT,
-      stack TEXT,
-      productType TEXT,
-      model TEXT,
-      company TEXT,
-      quantity INTEGER,
-      listed INTEGER,
-      date TEXT
-    )
-  `);
+ await db.exec(`
+  CREATE TABLE IF NOT EXISTS inventory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sku TEXT,
+    area TEXT,
+    shelf TEXT,
+    stack TEXT,
+    productType TEXT,
+    model TEXT,
+    company TEXT,
+    quantity INTEGER,
+    listed INTEGER,
+     ebayUrl TEXT,
+    ebayListedQuantity INTEGER,
+    ebayPrice REAL,
+    date TEXT
+  )
+`);
+
+await addColumnIfMissing("inventory", "sku", "TEXT");
+await addColumnIfMissing("inventory", "ebayUrl", "TEXT");
+await addColumnIfMissing("inventory", "ebayListedQuantity", "INTEGER");
+await addColumnIfMissing("inventory", "ebayPrice", "REAL");
+await addColumnIfMissing("inventory", "condition", "TEXT");
+await addColumnIfMissing("inventory", "notes", "TEXT");
+
+
+const columns = await db.all("PRAGMA table_info(inventory)");
+console.log("INVENTORY COLUMNS:", columns.map((col) => col.name));
 }
 
 initDB();
 
 // --- Routes ---
 app.get("/", (req, res) => {
-  res.send("Warehouse API running. Use /inventory to view products.");
+  res.redirect("/inventory");
 });
 
 app.get("/inventory", async (req, res) => {
@@ -91,14 +118,48 @@ app.get("/inventory", async (req, res) => {
 });
 
 app.post("/inventory", async (req, res) => {
-  const { area, shelf, stack, productType, model, company, quantity, listed, date } = req.body;
+const {
+  sku,
+  area,
+  shelf,
+  stack,
+  productType,
+  model,
+  company,
+  quantity,
+  listed,
+  ebayUrl,
+  ebayListedQuantity,
+  ebayPrice,
+  condition,
+  notes,
+  date,
+} = req.body;
 
-  await db.run(
-    `INSERT INTO inventory 
-      (area, shelf, stack, productType, model, company, quantity, listed, date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [area, shelf, stack, productType, model, company, quantity, listed ? 1 : 0, date]
-  );
+ await db.run(
+  `INSERT INTO inventory 
+    (sku, area, shelf, stack, productType, model, company, quantity, listed, ebayUrl, ebayListedQuantity, ebayPrice, condition, notes, date)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [
+    sku || "",
+    area,
+    shelf,
+    stack,
+    productType,
+    model,
+    company,
+    Number(quantity) || 0,
+    listed ? 1 : 0,
+    ebayUrl || "",
+    Number(ebayListedQuantity) || 0,
+    Number(ebayPrice) || 0,
+    condition || "",
+    notes || "",
+    date || "",
+  ]
+);
+ 
+
 
   res.json({ success: true });
 });
@@ -110,7 +171,23 @@ app.patch("/inventory/:id", async (req, res) => {
   if (keys.length === 0) return res.status(400).json({ error: "No field to update provided" });
 
   const field = keys[0];
-  const allowedFields = ["area","shelf","stack","productType","model","company","quantity","listed","date"];
+ const allowedFields = [
+  "sku",
+  "area",
+  "shelf",
+  "stack",
+  "productType",
+  "model",
+  "company",
+  "quantity",
+  "listed",
+  "ebayUrl",
+  "ebayListedQuantity",
+  "ebayPrice",
+  "condition",
+  "notes",
+  "date",
+];
 
   // ✅ Fix TypeScript 'includes' error
   if (!field || !allowedFields.includes(field as string)) {
@@ -151,27 +228,66 @@ app.post("/inventory/import", upload.single("file"), async (req, res) => {
 
     const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
 
-    const insertStmt = await db.prepare(`
-      INSERT INTO inventory
-        (area, shelf, stack, productType, model, company, quantity, listed, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+   const insertStmt = await db.prepare(`
+INSERT INTO inventory
+  (sku, area, shelf, stack, productType, model, company, quantity, listed, ebayUrl, ebayListedQuantity, ebayPrice, condition, notes, date)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
 
-    for (const row of rows) {
-      await insertStmt.run(
-        row.area || row.location || "",
-        row.shelf || "",
-        row.stack || "",
-        row.productType || row["unit type"] || "",
-        row.model || row["model number"] || "",
-        row.company || "",
-        Number(row.quantity) || 0,
-        row.listed ? 1 : 0,
-        row.date || row["date listed"] || ""
-      );
-    }
+for (const row of rows) {
+  await insertStmt.run(
+    row.sku || row.SKU || row["Custom Label"] || row["custom label"] || "",
 
-    await insertStmt.finalize();
+    row.area || row.Area || row.location || row.Location || "",
+
+    row.shelf || row.Shelf || "",
+
+    row.stack || row.Stack || "",
+
+    row.productType ||
+      row["Product Type"] ||
+      row["product type"] ||
+      row["unit type"] ||
+      "",
+
+    row.model || row.Model || row["model number"] || "",
+
+    row.company || row.Company || "",
+
+    Number(row.quantity || row.Quantity || 0),
+
+    row.listed === true ||
+    row.listed === "Yes" ||
+    row.Listed === "Yes" ||
+    row.listed === "yes" ||
+    row.Listed === "yes"
+      ? 1
+      : 0,
+
+    row.ebayUrl || row["eBay URL"] || row["ebay url"] || "",
+
+    Number(
+      row.ebayListedQuantity ||
+        row["eBay Listed Quantity"] ||
+        row["ebay listed quantity"] ||
+        0
+    ),
+
+    Number(row.ebayPrice || row["eBay Price"] || row["ebay price"] || 0),
+
+    row.condition || row.Condition || row["condition"] || "Used",
+
+    row.notes ||
+      row.Notes ||
+      row["Item Notes / Specs"] ||
+      row["item notes / specs"] ||
+      "",
+
+    row.date || row.Date || row["date listed"] || ""
+  );
+}
+
+await insertStmt.finalize();
 
     res.json({ success: true, imported: rows.length });
   } catch (err) {
