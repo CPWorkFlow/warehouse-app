@@ -13,9 +13,16 @@ type InventoryItem = {
   company: string;
   listed: boolean;
   ebayUrl?: string;
+  ebayItemId?: string;
+  ebayOfferId?: string;
+  ebayInventoryItemSku?: string;
+  ebayTitle?: string;
+  listedSource?: string;
+  listedSyncedAt?: string;
+  listingCheckStatus?: string;
   ebayListedQuantity?: number;
   ebayPrice?: number;
- condition?: string;
+  condition?: string;
   notes?: string;
   date?: string;
 };
@@ -30,10 +37,10 @@ function App() {
 
   // Form refs
   const ebayUrlRef = useRef<HTMLInputElement>(null);
-const ebayListedQuantityRef = useRef<HTMLInputElement>(null);
-const ebayPriceRef = useRef<HTMLInputElement>(null);
-const conditionRef = useRef<HTMLSelectElement>(null);
-const notesRef = useRef<HTMLTextAreaElement>(null);
+  const ebayListedQuantityRef = useRef<HTMLInputElement>(null);
+  const ebayPriceRef = useRef<HTMLInputElement>(null);
+  const conditionRef = useRef<HTMLSelectElement>(null);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
   const skuRef = useRef<HTMLInputElement>(null);
   const areaRef = useRef<HTMLInputElement>(null);
   const shelfRef = useRef<HTMLInputElement>(null);
@@ -50,21 +57,25 @@ const notesRef = useRef<HTMLTextAreaElement>(null);
 
   // Form state
   const [showDetailsEditor, setShowDetailsEditor] = useState(false);
-const [selectedDetailsItem, setSelectedDetailsItem] = useState<InventoryItem | null>(null);
+  const [selectedDetailsItem, setSelectedDetailsItem] =
+    useState<InventoryItem | null>(null);
   const [showListingBuilder, setShowListingBuilder] = useState(false);
-const [selectedListingItem, setSelectedListingItem] = useState<InventoryItem | null>(null);
-const [listingTitle, setListingTitle] = useState("");
-const [listingDescription, setListingDescription] = useState("");
-const [listingNotes, setListingNotes] = useState("");
-const [listingPrice, setListingPrice] = useState(0);
-const [listingQuantity, setListingQuantity] = useState(1);
-const [listingCondition, setListingCondition] = useState("Used");
-const [listingCategoryId, setListingCategoryId] = useState("");
+  const [selectedListingItem, setSelectedListingItem] =
+    useState<InventoryItem | null>(null);
+  const [listingFilter, setListingFilter] = useState("all");
+  const [listingTitle, setListingTitle] = useState("");
+  const [listingDescription, setListingDescription] = useState("");
+  const [listingNotes, setListingNotes] = useState("");
+  const [listingPrice, setListingPrice] = useState(0);
+  const [listingQuantity, setListingQuantity] = useState(1);
+  const [listingCondition, setListingCondition] = useState("Used");
+  const [listingCategoryId, setListingCategoryId] = useState("");
+  const [isGeneratingListing, setIsGeneratingListing] = useState(false);
   const [ebayUrl, setEbayUrl] = useState("");
-const [ebayListedQuantity, setEbayListedQuantity] = useState(0);
-const [ebayPrice, setEbayPrice] = useState(0);
-const [condition, setCondition] = useState("Used");
-const [notes, setNotes] = useState("");
+  const [ebayListedQuantity, setEbayListedQuantity] = useState(0);
+  const [ebayPrice, setEbayPrice] = useState(0);
+  const [condition, setCondition] = useState("Used");
+  const [notes, setNotes] = useState("");
   const [sku, setSku] = useState("");
   const [area, setArea] = useState("");
   const [shelf, setShelf] = useState("");
@@ -82,7 +93,58 @@ const [notes, setNotes] = useState("");
   const [totalQuantity, setTotalQuantity] = useState(0);
   const [countByModel, setCountByModel] = useState<Record<string, number>>({});
   const [countByArea, setCountByArea] = useState<Record<string, number>>({});
+  const getListingStatus = (item: InventoryItem) => {
+    const quantity = Number(item.quantity || 0);
+    const ebayListedQuantity = Number(item.ebayListedQuantity || 0);
 
+    if (quantity <= 0) return "sold_out";
+
+    if (item.listingCheckStatus) return item.listingCheckStatus;
+
+    if (item.listed && item.listedSource === "manual") return "manual_listed";
+
+    if (item.listed) return "listed";
+
+    if (ebayListedQuantity > 0) return "listed";
+
+    return "not_listed";
+  };
+
+  const getListingStatusLabel = (item: InventoryItem) => {
+    const status = getListingStatus(item);
+
+    switch (status) {
+      case "listed":
+        return "Listed";
+      case "manual_listed":
+        return "Manual Listed";
+      case "needs_review":
+        return "Needs Review";
+      case "sold_out":
+        return "Sold Out";
+      case "not_listed":
+        return "Needs Listing";
+      default:
+        return "Needs Listing";
+    }
+  };
+
+  const getListingStatusClass = (item: InventoryItem) => {
+    const status = getListingStatus(item);
+
+    switch (status) {
+      case "listed":
+        return "row-listed";
+      case "manual_listed":
+        return "row-manual-listed";
+      case "needs_review":
+        return "row-needs-review";
+      case "sold_out":
+        return "row-sold-out";
+      default:
+        return "";
+    }
+  };
   // Fetch inventory
   const fetchInventory = () => {
     fetch(`http://localhost:3001/inventory?query=${encodeURIComponent(search)}`)
@@ -115,70 +177,72 @@ const [notes, setNotes] = useState("");
 
   // Arrow navigation for Add Product form
   const handleArrowNavigation = (
-  e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
-  current: string
-) => {
-  const refs: Record<
-    string,
-    React.RefObject<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>
-  > = {
-    sku: skuRef,
-    area: areaRef,
-    shelf: shelfRef,
-    stack: stackRef,
-    productType: productTypeRef,
-    model: modelRef,
-    company: companyRef,
-    ebayUrl: ebayUrlRef,
-    ebayListedQuantity: ebayListedQuantityRef,
-    ebayPrice: ebayPriceRef,
-    condition: conditionRef,
-    notes: notesRef,
-    quantity: quantityRef,
-    listed: listedRef,
-    date: dateRef,
-  };
+    e: React.KeyboardEvent<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >,
+    current: string,
+  ) => {
+    const refs: Record<
+      string,
+      React.RefObject<
+        HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null
+      >
+    > = {
+      sku: skuRef,
+      area: areaRef,
+      shelf: shelfRef,
+      stack: stackRef,
+      productType: productTypeRef,
+      model: modelRef,
+      company: companyRef,
+      ebayUrl: ebayUrlRef,
+      ebayListedQuantity: ebayListedQuantityRef,
+      ebayPrice: ebayPriceRef,
+      condition: conditionRef,
+      notes: notesRef,
+      quantity: quantityRef,
+      listed: listedRef,
+      date: dateRef,
+    };
 
-  const keys = Object.keys(refs);
-  const index = keys.indexOf(current);
-  if (index === -1) return;
+    const keys = Object.keys(refs);
+    const index = keys.indexOf(current);
+    if (index === -1) return;
 
-  const goNext = () => {
-    const nextField = refs[keys[index + 1]];
-    nextField?.current?.focus();
-  };
+    const goNext = () => {
+      const nextField = refs[keys[index + 1]];
+      nextField?.current?.focus();
+    };
 
-  const goPrevious = () => {
-    const previousField = refs[keys[index - 1]];
-    previousField?.current?.focus();
-  };
+    const goPrevious = () => {
+      const previousField = refs[keys[index - 1]];
+      previousField?.current?.focus();
+    };
 
-  if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "Enter") {
-    if (current === "notes" && e.key === "Enter" && !e.ctrlKey) {
-      return;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "Enter") {
+      if (current === "notes" && e.key === "Enter" && !e.ctrlKey) {
+        return;
+      }
+
+      if (index < keys.length - 1) {
+        goNext();
+        e.preventDefault();
+      }
     }
 
-    if (index < keys.length - 1) {
-      goNext();
-      e.preventDefault();
+    if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      if (index > 0) {
+        goPrevious();
+        e.preventDefault();
+      }
     }
-  }
-
-  if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-    if (index > 0) {
-      goPrevious();
-      e.preventDefault();
-    }
-  }
-};
-
-
+  };
 
   // Arrow navigation for table rows
   const handleArrowKey = (
     e: React.KeyboardEvent<HTMLInputElement>,
     rowIndex: number,
-    field: string
+    field: string,
   ) => {
     const row = rowRefs.current[rowIndex];
     if (!row) return;
@@ -212,27 +276,26 @@ const [notes, setNotes] = useState("");
   };
 
   // Add product
-  
+
   const addProduct = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
-   const newItem: InventoryItem = {
-  sku,
-  area,
-  shelf: shelf || undefined,
-  stack: stack || undefined,
-  productType,
-  model,
-  quantity,
-  company,
-  listed,
-  ebayUrl,
-  ebayListedQuantity,
-  ebayPrice,
-  condition,
-  notes,
-  date: date || undefined,
-};
-
+    const newItem: InventoryItem = {
+      sku,
+      area,
+      shelf: shelf || undefined,
+      stack: stack || undefined,
+      productType,
+      model,
+      quantity,
+      company,
+      listed,
+      ebayUrl,
+      ebayListedQuantity,
+      ebayPrice,
+      condition,
+      notes,
+      date: date || undefined,
+    };
 
     fetch("http://localhost:3001/inventory", {
       method: "POST",
@@ -260,15 +323,16 @@ const [notes, setNotes] = useState("");
 
         setShowAddForm(false);
 
-       // areaRef.current?.focus();
+        // areaRef.current?.focus();
       });
   };
-//listing builder
+  //listing builder
 
-const openListingBuilder = (item: InventoryItem) => {
-  const title = `${item.company || ""} ${item.model || ""} ${item.productType || ""}`.trim();
+  const openListingBuilder = (item: InventoryItem) => {
+    const title =
+      `${item.company || ""} ${item.model || ""} ${item.productType || ""}`.trim();
 
-  const description = `
+    const description = `
 ${title}
 
 Condition:
@@ -293,20 +357,66 @@ Notes:
 Please review photos carefully for condition and included items.
 `.trim();
 
- setSelectedListingItem(item);
-setListingTitle(title);
-setListingDescription(description);
-setListingPrice(Number(item.ebayPrice || 0));
-setListingQuantity(Math.max(1, Number(item.quantity || 1)));
-setListingCondition(item.condition || "Used");
-setListingCategoryId("");
-setListingNotes(item.notes || "");
-setShowListingBuilder(true);
-};
+    setSelectedListingItem(item);
+    setListingTitle(title);
+    setListingDescription(description);
+    setListingPrice(Number(item.ebayPrice || 0));
+    setListingQuantity(Math.max(1, Number(item.quantity || 1)));
+    setListingCondition(item.condition || "Used");
+    setListingCategoryId("");
+    setListingNotes(item.notes || "");
+    setShowListingBuilder(true);
+  };
+  const generateListingWithAI = async () => {
+    if (!selectedListingItem) {
+      alert("Please select an item first.");
+      return;
+    }
+
+    try {
+      setIsGeneratingListing(true);
+
+      const response = await fetch(
+        "http://localhost:3001/ai/generate-listing",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            sku: selectedListingItem.sku,
+            model: selectedListingItem.model,
+            company: selectedListingItem.company,
+            productType: selectedListingItem.productType,
+            condition: listingCondition,
+            notes: listingNotes,
+            quantity: listingQuantity,
+            price: listingPrice,
+            categoryId: listingCategoryId,
+          }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || "AI listing generation failed.");
+        return;
+      }
+
+      setListingTitle(data.title || "");
+      setListingDescription(data.description || "");
+    } catch (err) {
+      console.error("AI listing generation failed:", err);
+      alert("AI listing generation failed. Check your backend terminal.");
+    } finally {
+      setIsGeneratingListing(false);
+    }
+  };
   // Inline edit
   const handleEdit = (id: number, field: keyof InventoryItem, value: any) => {
     setInventory((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
     );
     fetch(`http://localhost:3001/inventory/${id}`, {
       method: "PATCH",
@@ -314,7 +424,7 @@ setShowListingBuilder(true);
       body: JSON.stringify({ [field]: value }),
     });
   };
-    const getSingleSelectedItem = () => {
+  const getSingleSelectedItem = () => {
     if (selectedIds.length !== 1) {
       alert("Please select exactly one item.");
       return null;
@@ -351,7 +461,7 @@ setShowListingBuilder(true);
     setSelectedIds((prev) =>
       prev.includes(id)
         ? prev.filter((selectedId) => selectedId !== id)
-        : [...prev, id]
+        : [...prev, id],
     );
   };
 
@@ -363,7 +473,7 @@ setShowListingBuilder(true);
     }
 
     const confirmation = window.prompt(
-      `You are about to delete ${selectedIds.length} item(s). Type DELETE to confirm.`
+      `You are about to delete ${selectedIds.length} item(s). Type DELETE to confirm.`,
     );
 
     if (confirmation !== "DELETE") {
@@ -384,8 +494,8 @@ setShowListingBuilder(true);
   // Copyable model lists
 
   // Copyable model lists
-  const sortedModelEntries = Object.entries(countByModel || {}).sort(([modelA], [modelB]) =>
-    modelA.localeCompare(modelB)
+  const sortedModelEntries = Object.entries(countByModel || {}).sort(
+    ([modelA], [modelB]) => modelA.localeCompare(modelB),
   );
 
   const copyableModelsText = sortedModelEntries
@@ -415,10 +525,24 @@ setShowListingBuilder(true);
       alert("Could not copy model list with counts");
     }
   };
+  const filteredByListingStatus = inventory.filter((item) => {
+    const status = getListingStatus(item);
 
+    if (listingFilter === "all") return true;
+    if (listingFilter === "needs_listing") return status === "not_listed";
+    if (listingFilter === "listed") return status === "listed";
+    if (listingFilter === "manual_listed") return status === "manual_listed";
+    if (listingFilter === "needs_review") return status === "needs_review";
+    if (listingFilter === "sold_out") return status === "sold_out";
+
+    return true;
+  });
   // Pagination calculations
   const startIndex = (currentPage - 1) * rowsPerPage;
-  const paginatedInventory = inventory.slice(startIndex, startIndex + rowsPerPage);
+  const paginatedInventory = filteredByListingStatus.slice(
+    startIndex,
+    startIndex + rowsPerPage,
+  );
   const totalPages = Math.ceil(inventory.length / rowsPerPage);
 
   return (
@@ -449,448 +573,494 @@ setShowListingBuilder(true);
       />
 
       <div className="page-header">
-  <div>
-    <h1>Inventory Manager</h1>
-    <p>Track, search, and manage warehouse stock</p>
-  </div>
+        <div>
+          <h1>Inventory Manager</h1>
+          <p>Track, search, and manage warehouse stock</p>
+        </div>
 
-<div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-  <button
-    type="button"
-    className="primary-button"
-    onClick={() => setShowAddForm(true)}
-  >
-    + Add Item
-  </button>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => setShowAddForm(true)}
+          >
+            + Add Item
+          </button>
 
-  <button
-    type="button"
-    onClick={openDetailsEditorForSelected}
-    disabled={selectedIds.length !== 1}
-  >
-    Edit Details
-  </button>
+          <button
+            type="button"
+            onClick={openDetailsEditorForSelected}
+            disabled={selectedIds.length !== 1}
+          >
+            Edit Details
+          </button>
 
-  <button
-    type="button"
-    onClick={openListingBuilderForSelected}
-    disabled={selectedIds.length !== 1}
-  >
-    Create Listing
-  </button>
+          <button
+            type="button"
+            onClick={openListingBuilderForSelected}
+            disabled={selectedIds.length !== 1}
+          >
+            Create Listing
+          </button>
 
-  <button
-    type="button"
-    onClick={deleteSelectedItems}
-    disabled={selectedIds.length === 0}
-  >
-    Delete Selected ({selectedIds.length})
-  </button>
-</div>
-</div>
+          <button
+            type="button"
+            onClick={deleteSelectedItems}
+            disabled={selectedIds.length === 0}
+          >
+            Delete Selected ({selectedIds.length})
+          </button>
+        </div>
+      </div>
       {/* Add Product Form */}
       {showAddForm && (
-  <div className="drawer-backdrop">
-    <div className="drawer">
-      <div className="drawer-header">
-        <h2>Add Item</h2>
-        <button
-          type="button"
-          className="drawer-close"
-          onClick={() => setShowAddForm(false)}
-        >
-          Great Job!
-        </button>
-      </div>
-      
-      <form onSubmit={addProduct} className="drawer-form">
-       {[
-          {
-    keyName: "sku",
-    placeholder: "SKU / Custom Label",
-    value: sku,
-    setValue: setSku,
-    ref: skuRef,
-  },
-  {
-    keyName: "area",
-    placeholder: "Area",
-    value: area,
-    setValue: setArea,
-    ref: areaRef,
-    required: true,
-  },
-  {
-    keyName: "shelf",
-    placeholder: "Shelf (optional)",
-    value: shelf,
-    setValue: setShelf,
-    ref: shelfRef,
-  },
-  {
-    keyName: "stack",
-    placeholder: "Stack (optional)",
-    value: stack,
-    setValue: setStack,
-    ref: stackRef,
-  },
-  {
-    keyName: "productType",
-    placeholder: "Product Type",
-    value: productType,
-    setValue: setProductType,
-    ref: productTypeRef,
-    required: true,
-  },
-  {
-    keyName: "model",
-    placeholder: "Model",
-    value: model,
-    setValue: setModel,
-    ref: modelRef,
-    required: true,
-  },
-  {
-    keyName: "company",
-    placeholder: "Company",
-    value: company,
-    setValue: setCompany,
-    ref: companyRef,
-    required: true,
-  },
-].map((inputField) => (
-  <input
-    key={inputField.keyName}
-    placeholder={inputField.placeholder}
-    value={inputField.value}
-    onChange={(e) => inputField.setValue(e.target.value)}
-    ref={inputField.ref}
-    onKeyDown={(e) => handleArrowNavigation(e, inputField.keyName)}
-    required={inputField.required}
-  />
-))}
-<div className="drawer-section-title">eBay Info</div>
+        <div className="drawer-backdrop">
+          <div className="drawer">
+            <div className="drawer-header">
+              <h2>Add Item</h2>
+              <button
+                type="button"
+                className="drawer-close"
+                onClick={() => setShowAddForm(false)}
+              >
+                Great Job!
+              </button>
+            </div>
 
-<input
-  placeholder="eBay URL"
-  value={ebayUrl}
-  onChange={(e) => setEbayUrl(e.target.value)}
-  ref={ebayUrlRef}
-  onKeyDown={(e) => handleArrowNavigation(e, "ebayUrl")}
-/>
+            <form onSubmit={addProduct} className="drawer-form">
+              {[
+                {
+                  keyName: "sku",
+                  placeholder: "SKU / Custom Label",
+                  value: sku,
+                  setValue: setSku,
+                  ref: skuRef,
+                },
+                {
+                  keyName: "area",
+                  placeholder: "Area",
+                  value: area,
+                  setValue: setArea,
+                  ref: areaRef,
+                  required: true,
+                },
+                {
+                  keyName: "shelf",
+                  placeholder: "Shelf (optional)",
+                  value: shelf,
+                  setValue: setShelf,
+                  ref: shelfRef,
+                },
+                {
+                  keyName: "stack",
+                  placeholder: "Stack (optional)",
+                  value: stack,
+                  setValue: setStack,
+                  ref: stackRef,
+                },
+                {
+                  keyName: "productType",
+                  placeholder: "Product Type",
+                  value: productType,
+                  setValue: setProductType,
+                  ref: productTypeRef,
+                  required: true,
+                },
+                {
+                  keyName: "model",
+                  placeholder: "Model",
+                  value: model,
+                  setValue: setModel,
+                  ref: modelRef,
+                  required: true,
+                },
+                {
+                  keyName: "company",
+                  placeholder: "Company",
+                  value: company,
+                  setValue: setCompany,
+                  ref: companyRef,
+                  required: true,
+                },
+              ].map((inputField) => (
+                <input
+                  key={inputField.keyName}
+                  placeholder={inputField.placeholder}
+                  value={inputField.value}
+                  onChange={(e) => inputField.setValue(e.target.value)}
+                  ref={inputField.ref}
+                  onKeyDown={(e) =>
+                    handleArrowNavigation(e, inputField.keyName)
+                  }
+                  required={inputField.required}
+                />
+              ))}
+              <div className="drawer-section-title">eBay Info</div>
 
-<input
-  type="number"
-  placeholder="eBay Listed Quantity"
-  value={ebayListedQuantity}
-  onChange={(e) => setEbayListedQuantity(Number(e.target.value))}
-  ref={ebayListedQuantityRef}
-  onKeyDown={(e) => handleArrowNavigation(e, "ebayListedQuantity")}
-/>
+              <input
+                placeholder="eBay URL"
+                value={ebayUrl}
+                onChange={(e) => setEbayUrl(e.target.value)}
+                ref={ebayUrlRef}
+                onKeyDown={(e) => handleArrowNavigation(e, "ebayUrl")}
+              />
 
-<input
-  type="number"
-  step="0.01"
-  placeholder="eBay Price"
-  value={ebayPrice}
-  onChange={(e) => setEbayPrice(Number(e.target.value))}
-  ref={ebayPriceRef}
-  onKeyDown={(e) => handleArrowNavigation(e, "ebayPrice")}
-/>
-<select
-  value={condition}
-  onChange={(e) => setCondition(e.target.value)}
->
-  <option value="Used">Used</option>
-  <option value="New">New</option>
-  <option value="For parts or not working">For parts or not working</option>
-  <option value="Open box">Open box</option>
-</select>
+              <input
+                type="number"
+                placeholder="eBay Listed Quantity"
+                value={ebayListedQuantity}
+                onChange={(e) => setEbayListedQuantity(Number(e.target.value))}
+                ref={ebayListedQuantityRef}
+                onKeyDown={(e) =>
+                  handleArrowNavigation(e, "ebayListedQuantity")
+                }
+              />
 
-<textarea
-  placeholder="Item Notes / Specs. Example: 2x Intel Xeon CPUs, 128GB RAM, no HDD, dual PSU, tested to power on only"
-  value={notes}
-  onChange={(e) => setNotes(e.target.value)}
-  rows={4}
-/>
-        <input
-          type="number"
-          placeholder="Quantity"
-          value={quantity}
-          onChange={(e) => setQuantity(Number(e.target.value))}
-          ref={quantityRef}
-          onKeyDown={(e) => handleArrowNavigation(e, "quantity")}
-          required
-          style={{ marginRight: "0.5rem", width: "80px" }}
-        />
-        <label style={{ marginRight: "0.5rem" }}>
-          Listed?
-          <input
-            type="checkbox"
-            checked={listed}
-            onChange={(e) => setListed(e.target.checked)}
-            ref={listedRef}
-            onKeyDown={(e) => handleArrowNavigation(e, "listed")}
-            style={{ marginLeft: "0.25rem" }}
-          />
-        </label>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          ref={dateRef}
-          onKeyDown={(e) => handleArrowNavigation(e, "date")}
-          style={{ marginRight: "0.5rem" }}
-        />
-        <button type="submit">Add Product</button>
-      </form>
-    </div>
-  </div>
-)}
-{/* Edit Details Drawer */}
-{showDetailsEditor && selectedDetailsItem && (
-  <div className="drawer-backdrop">
-    <div className="drawer">
-      <div className="drawer-header">
-        <h2>Edit Details</h2>
-        <button
-          type="button"
-          className="drawer-close"
-          onClick={() => {
-            setShowDetailsEditor(false);
-            setSelectedDetailsItem(null);
-          }}
-        >
-          Close
-        </button>
-      </div>
+              <input
+                type="number"
+                step="0.01"
+                placeholder="eBay Price"
+                value={ebayPrice}
+                onChange={(e) => setEbayPrice(Number(e.target.value))}
+                ref={ebayPriceRef}
+                onKeyDown={(e) => handleArrowNavigation(e, "ebayPrice")}
+              />
+              <select
+                value={condition}
+                onChange={(e) => setCondition(e.target.value)}
+              >
+                <option value="Used">Used</option>
+                <option value="New">New</option>
+                <option value="For parts or not working">
+                  For parts or not working
+                </option>
+                <option value="Open box">Open box</option>
+              </select>
 
-      <div className="drawer-form">
-        <label className="form-label">
-          Area
-          <input
-            value={selectedDetailsItem.area || ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSelectedDetailsItem({ ...selectedDetailsItem, area: value });
-              handleEdit(selectedDetailsItem.id!, "area", value);
-            }}
-          />
-        </label>
+              <textarea
+                placeholder="Item Notes / Specs. Example: 2x Intel Xeon CPUs, 128GB RAM, no HDD, dual PSU, tested to power on only"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={4}
+              />
+              <input
+                type="number"
+                placeholder="Quantity"
+                value={quantity}
+                onChange={(e) => setQuantity(Number(e.target.value))}
+                ref={quantityRef}
+                onKeyDown={(e) => handleArrowNavigation(e, "quantity")}
+                required
+                style={{ marginRight: "0.5rem", width: "80px" }}
+              />
+              <label style={{ marginRight: "0.5rem" }}>
+                Listed?
+                <input
+                  type="checkbox"
+                  checked={listed}
+                  onChange={(e) => setListed(e.target.checked)}
+                  ref={listedRef}
+                  onKeyDown={(e) => handleArrowNavigation(e, "listed")}
+                  style={{ marginLeft: "0.25rem" }}
+                />
+              </label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                ref={dateRef}
+                onKeyDown={(e) => handleArrowNavigation(e, "date")}
+                style={{ marginRight: "0.5rem" }}
+              />
+              <button type="submit">Add Product</button>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Edit Details Drawer */}
+      {showDetailsEditor && selectedDetailsItem && (
+        <div className="drawer-backdrop">
+          <div className="drawer">
+            <div className="drawer-header">
+              <h2>Edit Details</h2>
+              <button
+                type="button"
+                className="drawer-close"
+                onClick={() => {
+                  setShowDetailsEditor(false);
+                  setSelectedDetailsItem(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
 
-        <label className="form-label">
-          Shelf
-          <input
-            value={selectedDetailsItem.shelf || ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSelectedDetailsItem({ ...selectedDetailsItem, shelf: value });
-              handleEdit(selectedDetailsItem.id!, "shelf", value);
-            }}
-          />
-        </label>
+            <div className="drawer-form">
+              <label className="form-label">
+                Area
+                <input
+                  value={selectedDetailsItem.area || ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedDetailsItem({
+                      ...selectedDetailsItem,
+                      area: value,
+                    });
+                    handleEdit(selectedDetailsItem.id!, "area", value);
+                  }}
+                />
+              </label>
 
-        <label className="form-label">
-          Stack
-          <input
-            value={selectedDetailsItem.stack || ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSelectedDetailsItem({ ...selectedDetailsItem, stack: value });
-              handleEdit(selectedDetailsItem.id!, "stack", value);
-            }}
-          />
-        </label>
+              <label className="form-label">
+                Shelf
+                <input
+                  value={selectedDetailsItem.shelf || ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedDetailsItem({
+                      ...selectedDetailsItem,
+                      shelf: value,
+                    });
+                    handleEdit(selectedDetailsItem.id!, "shelf", value);
+                  }}
+                />
+              </label>
 
-        <label className="form-label">
-          Condition
-          <select
-            value={selectedDetailsItem.condition || "Used"}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSelectedDetailsItem({
-                ...selectedDetailsItem,
-                condition: value,
-              });
-              handleEdit(selectedDetailsItem.id!, "condition", value);
-            }}
-          >
-            <option value="Used">Used</option>
-            <option value="New">New</option>
-            <option value="For parts or not working">
-              For parts or not working
-            </option>
-            <option value="Open box">Open box</option>
-          </select>
-        </label>
+              <label className="form-label">
+                Stack
+                <input
+                  value={selectedDetailsItem.stack || ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedDetailsItem({
+                      ...selectedDetailsItem,
+                      stack: value,
+                    });
+                    handleEdit(selectedDetailsItem.id!, "stack", value);
+                  }}
+                />
+              </label>
 
-        <label className="form-label">
-          Notes / Specs
-          <textarea
-            rows={6}
-            value={selectedDetailsItem.notes || ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSelectedDetailsItem({ ...selectedDetailsItem, notes: value });
-              handleEdit(selectedDetailsItem.id!, "notes", value);
-            }}
-          />
-        </label>
+              <label className="form-label">
+                Condition
+                <select
+                  value={selectedDetailsItem.condition || "Used"}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedDetailsItem({
+                      ...selectedDetailsItem,
+                      condition: value,
+                    });
+                    handleEdit(selectedDetailsItem.id!, "condition", value);
+                  }}
+                >
+                  <option value="Used">Used</option>
+                  <option value="New">New</option>
+                  <option value="For parts or not working">
+                    For parts or not working
+                  </option>
+                  <option value="Open box">Open box</option>
+                </select>
+              </label>
 
-        <label className="form-label">
-          eBay URL
-          <input
-            value={selectedDetailsItem.ebayUrl || ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSelectedDetailsItem({ ...selectedDetailsItem, ebayUrl: value });
-              handleEdit(selectedDetailsItem.id!, "ebayUrl", value);
-            }}
-          />
-        </label>
+              <label className="form-label">
+                Notes / Specs
+                <textarea
+                  rows={6}
+                  value={selectedDetailsItem.notes || ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedDetailsItem({
+                      ...selectedDetailsItem,
+                      notes: value,
+                    });
+                    handleEdit(selectedDetailsItem.id!, "notes", value);
+                  }}
+                />
+              </label>
 
-        <label className="form-label">
-          eBay Listed Quantity
-          <input
-            type="number"
-            value={selectedDetailsItem.ebayListedQuantity || 0}
-            onChange={(e) => {
-              const value = Number(e.target.value);
-              setSelectedDetailsItem({
-                ...selectedDetailsItem,
-                ebayListedQuantity: value,
-              });
-              handleEdit(selectedDetailsItem.id!, "ebayListedQuantity", value);
-            }}
-          />
-        </label>
+              <label className="form-label">
+                eBay URL
+                <input
+                  value={selectedDetailsItem.ebayUrl || ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedDetailsItem({
+                      ...selectedDetailsItem,
+                      ebayUrl: value,
+                    });
+                    handleEdit(selectedDetailsItem.id!, "ebayUrl", value);
+                  }}
+                />
+              </label>
 
-        <label className="form-label">
-          Date Listed
-          <input
-            type="date"
-            value={selectedDetailsItem.date || ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSelectedDetailsItem({ ...selectedDetailsItem, date: value });
-              handleEdit(selectedDetailsItem.id!, "date", value);
-            }}
-          />
-        </label>
-      </div>
-    </div>
-  </div>
-)}
-{/* Listing Builder Drawer */}
-{showListingBuilder && selectedListingItem && (
-  <div className="drawer-backdrop">
-    <div className="drawer listing-drawer">
-      <div className="drawer-header">
-        <h2>Create Listing</h2>
-        <button
-          type="button"
-          className="drawer-close"
-          onClick={() => setShowListingBuilder(false)}
-        >
-          Close
-        </button>
-      </div>
+              <label className="form-label">
+                eBay Listed Quantity
+                <input
+                  type="number"
+                  value={selectedDetailsItem.ebayListedQuantity || 0}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setSelectedDetailsItem({
+                      ...selectedDetailsItem,
+                      ebayListedQuantity: value,
+                    });
+                    handleEdit(
+                      selectedDetailsItem.id!,
+                      "ebayListedQuantity",
+                      value,
+                    );
+                  }}
+                />
+              </label>
 
-      <div className="drawer-form listing-builder-form">
-        <div className="drawer-section-title">Item</div>
+              <label className="form-label">
+                Date Listed
+                <input
+                  type="date"
+                  value={selectedDetailsItem.date || ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedDetailsItem({
+                      ...selectedDetailsItem,
+                      date: value,
+                    });
+                    handleEdit(selectedDetailsItem.id!, "date", value);
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Listing Builder Drawer */}
+      {showListingBuilder && selectedListingItem && (
+        <div className="drawer-backdrop">
+          <div className="drawer listing-drawer">
+            <div className="drawer-header">
+              <h2>Create Listing</h2>
+              <button
+                type="button"
+                className="drawer-close"
+                onClick={() => setShowListingBuilder(false)}
+              >
+                Close
+              </button>
+            </div>
 
-        <p>
-          <strong>SKU:</strong> {selectedListingItem.sku || "N/A"}
-        </p>
+            <div className="drawer-form listing-builder-form">
+              <div className="drawer-section-title">Item</div>
 
-        <p>
-          <strong>Model:</strong> {selectedListingItem.model}
-        </p>
+              <p>
+                <strong>SKU:</strong> {selectedListingItem.sku || "N/A"}
+              </p>
 
-        <p>
-          <strong>Quantity:</strong> {selectedListingItem.quantity}
-        </p>
-        <div className="drawer-section-title">Listing Details</div>
+              <p>
+                <strong>Model:</strong> {selectedListingItem.model}
+              </p>
 
-<label className="form-label">
-  Price
-  <input
-    type="number"
-    step="0.01"
-    placeholder="Listing Price"
-    value={listingPrice}
-    onChange={(e) => setListingPrice(Number(e.target.value))}
-  />
-</label>
+              <p>
+                <strong>Quantity:</strong> {selectedListingItem.quantity}
+              </p>
+              <div className="drawer-section-title">Listing Details</div>
 
-<label className="form-label">
-  Quantity to List
-  <input
-    type="number"
-    placeholder="Quantity to List"
-    value={listingQuantity}
-    onChange={(e) => setListingQuantity(Number(e.target.value))}
-  />
-</label>
-<label className="form-label">
-  Condition
+              <label className="form-label">
+                Price
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Listing Price"
+                  value={listingPrice}
+                  onChange={(e) => setListingPrice(Number(e.target.value))}
+                />
+              </label>
 
-<select
-  value={listingCondition}
-  onChange={(e) => setListingCondition(e.target.value)}
->
-  <option value="Used">Used</option>
-  <option value="New">New</option>
-  <option value="For parts or not working">For parts or not working</option>
-  <option value="Open box">Open box</option>
-</select>
-</label>
-<label className="form-label">
-  eBay Category ID
-  <input
-    placeholder="eBay Category ID"
-    value={listingCategoryId}
-    onChange={(e) => setListingCategoryId(e.target.value)}
-  />
-</label>
+              <label className="form-label">
+                Quantity to List
+                <input
+                  type="number"
+                  placeholder="Quantity to List"
+                  value={listingQuantity}
+                  onChange={(e) => setListingQuantity(Number(e.target.value))}
+                />
+              </label>
+              <label className="form-label">
+                Condition
+                <select
+                  value={listingCondition}
+                  onChange={(e) => setListingCondition(e.target.value)}
+                >
+                  <option value="Used">Used</option>
+                  <option value="New">New</option>
+                  <option value="For parts or not working">
+                    For parts or not working
+                  </option>
+                  <option value="Open box">Open box</option>
+                </select>
+              </label>
+              <label className="form-label">
+                eBay Category ID
+                <input
+                  placeholder="eBay Category ID"
+                  value={listingCategoryId}
+                  onChange={(e) => setListingCategoryId(e.target.value)}
+                />
+              </label>
 
-<label className="form-label">  Item Notes / Specs  <textarea    placeholder="Example: 2x Intel Xeon CPUs, 128GB RAM, no HDD, dual PSU, tested to power on only"    value={listingNotes}    onChange={(e) => setListingNotes(e.target.value)}    rows={5}  /></label>
+              <label className="form-label">
+                Item Notes / Specs
+                <textarea
+                  placeholder="Example: 2x Intel Xeon CPUs, 128GB RAM, no HDD, dual PSU, tested to power on only"
+                  value={listingNotes}
+                  onChange={(e) => setListingNotes(e.target.value)}
+                  rows={5}
+                />
+              </label>
 
+              <button
+                type="button"
+                className="primary-button"
+                onClick={generateListingWithAI}
+                disabled={isGeneratingListing}
+              >
+                {isGeneratingListing ? "Generating..." : "Generate with AI"}
+              </button>
 
-        <div className="drawer-section-title">eBay Title</div>
+              <div className="drawer-section-title">eBay Title</div>
+              <input
+                value={listingTitle}
+                onChange={(e) => setListingTitle(e.target.value)}
+              />
 
-        <input
-          value={listingTitle}
-          onChange={(e) => setListingTitle(e.target.value)}
-        />
+              <div className="drawer-section-title">Description</div>
 
-        <div className="drawer-section-title">Description</div>
+              <textarea
+                value={listingDescription}
+                onChange={(e) => setListingDescription(e.target.value)}
+                rows={12}
+              />
 
-        <textarea
-          value={listingDescription}
-          onChange={(e) => setListingDescription(e.target.value)}
-          rows={12}
-        />
+              <div className="copy-buttons">
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(listingTitle)}
+                >
+                  Copy Title
+                </button>
 
-       <div className="copy-buttons">
-  <button
-    type="button"
-    onClick={() => navigator.clipboard.writeText(listingTitle)}
-  >
-    Copy Title
-  </button>
-
-  <button
-    type="button"
-    onClick={() => navigator.clipboard.writeText(listingDescription)}
-  >
-    Copy Description
-  </button>
-</div>
-      </div>
-    </div>
-  </div>
-)}
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigator.clipboard.writeText(listingDescription)
+                  }
+                >
+                  Copy Description
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div style={{ marginBottom: "1rem" }}>
@@ -909,7 +1079,13 @@ setShowListingBuilder(true);
         <div style={{ marginBottom: "1rem", marginTop: "1rem" }}>
           <strong>Count by Model:</strong>{" "}
           <select
-            style={{ maxHeight: "150px", overflowY: "scroll", display: "block", width: "320px", marginTop: "0.5rem" }}
+            style={{
+              maxHeight: "150px",
+              overflowY: "scroll",
+              display: "block",
+              width: "320px",
+              marginTop: "0.5rem",
+            }}
             size={5}
           >
             {sortedModelEntries.map(([model, count]) => (
@@ -918,8 +1094,14 @@ setShowListingBuilder(true);
               </option>
             ))}
           </select>
-
-          <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <div
+            style={{
+              marginTop: "0.75rem",
+              display: "flex",
+              gap: "0.5rem",
+              flexWrap: "wrap",
+            }}
+          >
             <button type="button" onClick={handleCopyModels}>
               Copy Models
             </button>
@@ -927,7 +1109,6 @@ setShowListingBuilder(true);
               Copy Models + Counts
             </button>
           </div>
-
           <textarea
             value={copyableModelsWithCountsText}
             readOnly
@@ -949,117 +1130,200 @@ setShowListingBuilder(true);
           </span>
         ))}
       </div>
+      <div className="listing-filter-bar">
+        <button
+          type="button"
+          className={listingFilter === "all" ? "active-filter" : ""}
+          onClick={() => setListingFilter("all")}
+        >
+          All
+        </button>
 
+        <button
+          type="button"
+          className={listingFilter === "needs_listing" ? "active-filter" : ""}
+          onClick={() => setListingFilter("needs_listing")}
+        >
+          Needs Listing
+        </button>
+
+        <button
+          type="button"
+          className={listingFilter === "listed" ? "active-filter" : ""}
+          onClick={() => setListingFilter("listed")}
+        >
+          Listed
+        </button>
+
+        <button
+          type="button"
+          className={listingFilter === "manual_listed" ? "active-filter" : ""}
+          onClick={() => setListingFilter("manual_listed")}
+        >
+          Manual Listed
+        </button>
+
+        <button
+          type="button"
+          className={listingFilter === "needs_review" ? "active-filter" : ""}
+          onClick={() => setListingFilter("needs_review")}
+        >
+          Needs Review
+        </button>
+
+        <button
+          type="button"
+          className={listingFilter === "sold_out" ? "active-filter" : ""}
+          onClick={() => setListingFilter("sold_out")}
+        >
+          Sold Out
+        </button>
+      </div>
       {/* Inventory Table */}
       <table border={1} cellPadding={5}>
         <thead>
-    <tr>
-  <th>Select</th>
-  <th>SKU</th>
-  <th>Model</th>
-  <th>Company</th>
-  <th>Product Type</th>
-  <th>Quantity</th>
-  <th>Available Stock</th>
-  <th>Location</th>
-  <th>eBay Price</th>
-  <th>Listed</th>
-</tr>
-
+          <tr>
+            <th>Select</th>
+            <th>SKU</th>
+            <th>Model</th>
+            <th>Company</th>
+            <th>Product Type</th>
+            <th>Quantity</th>
+            <th>Available Stock</th>
+            <th>Location</th>
+            <th>eBay Price</th>
+            <th>Listed</th>
+            <th>Listing Status</th>
+          </tr>
         </thead>
         <tbody>
           {paginatedInventory.map((item, index) => {
             const rowIndex = startIndex + index;
-           return (
-  <tr key={item.id!}>
-    <td>
-      <input
-        type="checkbox"
-        checked={selectedIds.includes(item.id!)}
-        onChange={() => toggleSelectedItem(item.id!)}
-      />
-    </td>
+            return (
+              <tr key={item.id} className={getListingStatusClass(item)}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(item.id!)}
+                    onChange={() => toggleSelectedItem(item.id!)}
+                  />
+                </td>
 
-    {[
-      "sku",
-      "model",
-      "company",
-      "productType",
-    ].map((field) => (
+                {["sku", "model", "company", "productType"].map((field) => (
                   <td key={field}>
                     <input
                       ref={(el) => {
-                        if (!rowRefs.current[rowIndex]) rowRefs.current[rowIndex] = {};
+                        if (!rowRefs.current[rowIndex])
+                          rowRefs.current[rowIndex] = {};
                         rowRefs.current[rowIndex][field] = el;
                       }}
                       value={String(item[field as keyof InventoryItem] ?? "")}
                       onChange={(e) =>
-                        handleEdit(item.id!, field as keyof InventoryItem, e.target.value)
+                        handleEdit(
+                          item.id!,
+                          field as keyof InventoryItem,
+                          e.target.value,
+                        )
                       }
-                     onKeyDown={(e) => handleArrowKey(e, rowIndex, field)}
-title={
-  field === "model"
-    ? `Condition: ${item.condition || "N/A"}\nNotes: ${
-        item.notes || "No notes"
-      }\nDate Listed: ${item.date || "N/A"}\neBay URL: ${
-        item.ebayUrl || "N/A"
-      }`
-    : ""
-}
+                      onKeyDown={(e) => handleArrowKey(e, rowIndex, field)}
+                      title={
+                        field === "model"
+                          ? `Condition: ${item.condition || "N/A"}\nNotes: ${
+                              item.notes || "No notes"
+                            }\nDate Listed: ${item.date || "N/A"}\neBay URL: ${
+                              item.ebayUrl || "N/A"
+                            }`
+                          : ""
+                      }
                     />
                   </td>
-                               ))}
+                ))}
                 {/* Quantity */}
                 <td>
                   <input
                     type="number"
                     ref={(el) => {
-                      if (!rowRefs.current[rowIndex]) rowRefs.current[rowIndex] = {};
+                      if (!rowRefs.current[rowIndex])
+                        rowRefs.current[rowIndex] = {};
                       rowRefs.current[rowIndex].quantity = el;
                     }}
                     value={item.quantity}
-                    onChange={(e) => handleEdit(item.id!, "quantity", Number(e.target.value))}
+                    onChange={(e) =>
+                      handleEdit(item.id!, "quantity", Number(e.target.value))
+                    }
                     onKeyDown={(e) => handleArrowKey(e, rowIndex, "quantity")}
                   />
                 </td>
 
                 {/* Available */}
                 <td>
-                  {Number(item.quantity || 0) - Number(item.ebayListedQuantity || 0)}
+                  {Number(item.quantity || 0) -
+                    Number(item.ebayListedQuantity || 0)}
                 </td>
-{/* Location */}
-<td>
-  {[item.area, item.shelf, item.stack].filter(Boolean).join(" / ")}
-</td>
+                {/* Location */}
+                <td>
+                  {[item.area, item.shelf, item.stack]
+                    .filter(Boolean)
+                    .join(" / ")}
+                </td>
 
-{/* eBay Price */}
-<td>
-  <input
-    type="number"
-    step="0.01"
-    value={item.ebayPrice || 0}
-    onChange={(e) =>
-      handleEdit(item.id!, "ebayPrice", Number(e.target.value))
-    }
-  />
-</td>
+                {/* eBay Price */}
+                <td>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={item.ebayPrice || 0}
+                    onChange={(e) =>
+                      handleEdit(item.id!, "ebayPrice", Number(e.target.value))
+                    }
+                  />
+                </td>
+                <td>
+                  <span
+                    className={`listing-status-badge ${getListingStatus(item)}`}
+                  >
+                    {getListingStatusLabel(item)}
+                  </span>
+                </td>
                 {/* Listed */}
                 <td>
                   <input
                     type="checkbox"
-                    ref={(el) => {
-                      if (!rowRefs.current[rowIndex]) rowRefs.current[rowIndex] = {};
-                      rowRefs.current[rowIndex].listed = el;
+                    checked={!!item.listed}
+                    onChange={async (e) => {
+                      const isListed = e.target.checked;
+
+                      await handleEdit(item.id!, "listed", isListed);
+
+                      if (isListed) {
+                        await handleEdit(item.id!, "listedSource", "manual");
+                        await handleEdit(
+                          item.id!,
+                          "listingCheckStatus",
+                          "manual_listed",
+                        );
+
+                        if (
+                          !item.ebayListedQuantity ||
+                          Number(item.ebayListedQuantity) <= 0
+                        ) {
+                          await handleEdit(item.id!, "ebayListedQuantity", 1);
+                        }
+                      } else {
+                        await handleEdit(item.id!, "listedSource", "");
+                        await handleEdit(
+                          item.id!,
+                          "listingCheckStatus",
+                          "not_listed",
+                        );
+                        await handleEdit(item.id!, "ebayListedQuantity", 0);
+                      }
+
+                      fetchInventory();
                     }}
-                    checked={item.listed}
-                    onChange={(e) => handleEdit(item.id!, "listed", e.target.checked)}
                     onKeyDown={(e) => handleArrowKey(e, rowIndex, "listed")}
                   />
                 </td>
-             
-
-
-               
               </tr>
             );
           })}
@@ -1068,7 +1332,10 @@ title={
 
       {/* Pagination Controls */}
       <div style={{ marginTop: "1rem" }}>
-        <button onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))} disabled={currentPage === 1}>
+        <button
+          onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+          disabled={currentPage === 1}
+        >
           Prev
         </button>
 
@@ -1077,9 +1344,7 @@ title={
         </span>
 
         <button
-          onClick={() =>
-            setCurrentPage((p) => Math.min(p + 1, totalPages))
-          }
+          onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
           disabled={currentPage === totalPages}
         >
           Next
