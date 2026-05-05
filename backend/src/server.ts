@@ -376,7 +376,136 @@ app.post("/ebay/sync-test", async (req, res) => {
     res.status(500).json({ error: "Manual eBay sync test failed" });
   }
 });
+// --- Fake active eBay listing sync route ---
+app.post("/ebay/sync-active-listings-test", async (req, res) => {
+  try {
+    const fakeEbayListings = [
+      {
+        ebayItemId: "FAKE-CLEAN-TEST-001",
+        title: "TestDell TestR640 Server",
+        quantity: 1,
+        price: 399.99,
+        url: "https://www.ebay.com/itm/FAKE-CLEAN-TEST-001",
+      },
+    ];
 
+    const results = [];
+
+    for (const listing of fakeEbayListings) {
+      // 1. First try to match by exact eBay Item ID
+      let item = await db.get("SELECT * FROM inventory WHERE ebayItemId = ?", [
+        listing.ebayItemId,
+      ]);
+
+      let matchType = "ebayItemId";
+
+      // 2. If no eBay Item ID match, try matching by company + model inside the eBay title
+      if (!item) {
+        const matchingItems = await db.all(
+          `SELECT * FROM inventory
+           WHERE ? LIKE '%' || LOWER(TRIM(company)) || '%'
+           AND ? LIKE '%' || LOWER(TRIM(model)) || '%'
+           AND quantity > 0`,
+          [listing.title.toLowerCase(), listing.title.toLowerCase()],
+        );
+
+        if (matchingItems.length === 1) {
+          item = matchingItems[0];
+          matchType = "title_contains_company_model";
+        }
+
+        if (matchingItems.length > 1) {
+          await db.run(
+            `UPDATE inventory
+             SET listingCheckStatus = ?,
+                 listedSource = ?,
+                 ebayTitle = ?,
+                 listedSyncedAt = ?
+             WHERE id = ?`,
+            [
+              "needs_review",
+              "ebay_sync",
+              listing.title,
+              new Date().toISOString(),
+              matchingItems[0].id,
+            ],
+          );
+
+          results.push({
+            ebayItemId: listing.ebayItemId,
+            title: listing.title,
+            matched: false,
+            needsReview: true,
+            possibleMatches: matchingItems.length,
+            message:
+              "Multiple inventory rows matched company + model inside the eBay title. Needs manual review.",
+          });
+
+          continue;
+        }
+      }
+
+      // 3. If still no match, save result as unmatched for now
+      if (!item) {
+        results.push({
+          ebayItemId: listing.ebayItemId,
+          title: listing.title,
+          matched: false,
+          message: "No matching inventory item found",
+        });
+
+        continue;
+      }
+
+      // 4. Safe match: mark item as listed
+      await db.run(
+        `UPDATE inventory
+         SET listed = ?,
+             ebayItemId = ?,
+             ebayTitle = ?,
+             ebayUrl = ?,
+             ebayListedQuantity = ?,
+             ebayPrice = ?,
+             listedSource = ?,
+             listedSyncedAt = ?,
+             listingCheckStatus = ?
+         WHERE id = ?`,
+        [
+          1,
+          listing.ebayItemId,
+          listing.title,
+          listing.url,
+          Number(listing.quantity) || 1,
+          Number(listing.price) || 0,
+          "ebay_sync",
+          new Date().toISOString(),
+          "listed",
+          item.id,
+        ],
+      );
+
+      results.push({
+        ebayItemId: listing.ebayItemId,
+        title: listing.title,
+        matched: true,
+        matchType,
+        inventoryId: item.id,
+        inventoryModel: item.model,
+        inventoryCompany: item.company,
+        message: "Inventory item marked as listed from fake eBay sync.",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Fake active eBay listing sync completed.",
+      results,
+    });
+  } catch (err) {
+    console.error("Fake active eBay listing sync failed:", err);
+    res.status(500).json({ error: "Fake active eBay listing sync failed" });
+  }
+});
 // --- AI listing generator route ---
 app.post("/ai/generate-listing", async (req, res) => {
   try {
