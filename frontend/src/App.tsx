@@ -30,7 +30,8 @@ type InventoryItem = {
 function App() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [search, setSearch] = useState("");
-
+  const [locationSearch, setLocationSearch] = useState("");
+  const [showLocationLookup, setShowLocationLookup] = useState(false);
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 25;
@@ -62,6 +63,8 @@ function App() {
   const [showListingBuilder, setShowListingBuilder] = useState(false);
   const [selectedListingItem, setSelectedListingItem] =
     useState<InventoryItem | null>(null);
+  const [syncResults, setSyncResults] = useState<any[]>([]);
+  const [isSyncingEbay, setIsSyncingEbay] = useState(false);
   const [listingFilter, setListingFilter] = useState("all");
   const [listingTitle, setListingTitle] = useState("");
   const [listingDescription, setListingDescription] = useState("");
@@ -164,6 +167,43 @@ function App() {
       });
   };
 
+  const syncActiveEbayListings = async () => {
+    try {
+      setIsSyncingEbay(true);
+      setSyncResults([]);
+
+      const response = await fetch(
+        "http://localhost:3001/ebay/sync-active-listings-test",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || "Failed to sync active eBay listings.");
+        return;
+      }
+
+      console.log("eBay sync result:", data);
+
+      setSyncResults(data.results || []);
+
+      alert("Active eBay listings synced successfully!");
+
+      fetchInventory();
+    } catch (err) {
+      console.error("Failed to sync active eBay listings:", err);
+      alert(
+        "Failed to sync active eBay listings. Check your backend terminal.",
+      );
+    } finally {
+      setIsSyncingEbay(false);
+    }
+  };
   // Run once on mount
   useEffect(() => {
     fetchInventory();
@@ -544,7 +584,56 @@ Please review photos carefully for condition and included items.
     startIndex + rowsPerPage,
   );
   const totalPages = Math.ceil(inventory.length / rowsPerPage);
+  const normalizeLocationText = (value: string) =>
+    value.toLowerCase().replace(/\s+/g, "");
 
+  const locationSearchNormalized = normalizeLocationText(locationSearch.trim());
+
+  const locationItems = locationSearchNormalized
+    ? inventory.filter((item) => {
+        const area = String(item.area || "");
+        const shelf = String(item.shelf || "");
+        const stack = String(item.stack || "");
+
+        const fullLocation = `${area} ${shelf} ${stack}`;
+        const normalizedFullLocation = normalizeLocationText(fullLocation);
+
+        return normalizedFullLocation.includes(locationSearchNormalized);
+      })
+    : [];
+
+  const locationTotalQuantity = locationItems.reduce(
+    (total, item) => total + Number(item.quantity || 0),
+    0,
+  );
+
+  const locationCountByStack = locationItems.reduce<Record<string, number>>(
+    (acc, item) => {
+      const stackName = item.stack?.trim() || "No Stack Listed";
+      acc[stackName] = (acc[stackName] || 0) + Number(item.quantity || 0);
+      return acc;
+    },
+    {},
+  );
+
+  const locationStackEntries = Object.entries(locationCountByStack).sort(
+    ([stackA], [stackB]) => stackA.localeCompare(stackB),
+  );
+
+  const locationModelBreakdown = locationItems.reduce<Record<string, number>>(
+    (acc, item) => {
+      const modelName =
+        `${item.company || ""} ${item.model || ""}`.trim() || "Unknown Item";
+
+      acc[modelName] = (acc[modelName] || 0) + Number(item.quantity || 0);
+      return acc;
+    },
+    {},
+  );
+
+  const locationModelEntries = Object.entries(locationModelBreakdown).sort(
+    ([modelA], [modelB]) => modelA.localeCompare(modelB),
+  );
   return (
     <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
       <h1>Chaim's Dashboard</h1>
@@ -586,7 +675,13 @@ Please review photos carefully for condition and included items.
           >
             + Add Item
           </button>
-
+          <button
+            type="button"
+            onClick={syncActiveEbayListings}
+            disabled={isSyncingEbay}
+          >
+            {isSyncingEbay ? "Syncing..." : "Sync Active eBay Listings"}
+          </button>
           <button
             type="button"
             onClick={openDetailsEditorForSelected}
@@ -1076,51 +1171,133 @@ Please review photos carefully for condition and included items.
       <div style={{ marginBottom: "1rem" }}>
         <strong>Total Quantity:</strong> {totalQuantity}
         <br />
-        <div style={{ marginBottom: "1rem", marginTop: "1rem" }}>
-          <strong>Count by Model:</strong>{" "}
-          <select
-            style={{
-              maxHeight: "150px",
-              overflowY: "scroll",
-              display: "block",
-              width: "320px",
-              marginTop: "0.5rem",
-            }}
-            size={5}
-          >
-            {sortedModelEntries.map(([model, count]) => (
-              <option key={model} value={model}>
-                {model}: {count}
-              </option>
-            ))}
-          </select>
-          <div
-            style={{
-              marginTop: "0.75rem",
-              display: "flex",
-              gap: "0.5rem",
-              flexWrap: "wrap",
-            }}
-          >
-            <button type="button" onClick={handleCopyModels}>
-              Copy Models
-            </button>
-            <button type="button" onClick={handleCopyModelsWithCounts}>
-              Copy Models + Counts
-            </button>
+        <div className="dashboard-tools-row">
+          <div className="model-count-card">
+            <strong>Count by Model:</strong>{" "}
+            <select
+              style={{
+                maxHeight: "150px",
+                overflowY: "scroll",
+                display: "block",
+                width: "320px",
+                marginTop: "0.5rem",
+              }}
+              size={5}
+            >
+              {sortedModelEntries.map(([model, count]) => (
+                <option key={model} value={model}>
+                  {model}: {count}
+                </option>
+              ))}
+            </select>
+            <div
+              style={{
+                marginTop: "0.75rem",
+                display: "flex",
+                gap: "0.5rem",
+                flexWrap: "wrap",
+              }}
+            >
+              <button type="button" onClick={handleCopyModels}>
+                Copy Models
+              </button>
+              <button type="button" onClick={handleCopyModelsWithCounts}>
+                Copy Models + Counts
+              </button>
+            </div>
+            <textarea
+              value={copyableModelsWithCountsText}
+              readOnly
+              rows={10}
+              style={{
+                width: "320px",
+                marginTop: "0.75rem",
+                padding: "8px",
+                fontFamily: "monospace",
+                resize: "vertical",
+              }}
+            />
           </div>
-          <textarea
-            value={copyableModelsWithCountsText}
-            readOnly
-            rows={10}
-            style={{
-              width: "320px",
-              marginTop: "0.75rem",
-              padding: "8px",
-              fontFamily: "monospace",
-              resize: "vertical",
-            }}
-          />
+
+          <div className="location-lookup-side-card">
+            <div className="location-lookup-header">
+              <strong>Location Lookup</strong>
+
+              <button
+                type="button"
+                onClick={() => setShowLocationLookup((prev) => !prev)}
+              >
+                {showLocationLookup ? "Hide" : "Open"}
+              </button>
+            </div>
+
+            {showLocationLookup && (
+              <div className="location-lookup-panel">
+                <input
+                  value={locationSearch}
+                  onChange={(e) => setLocationSearch(e.target.value)}
+                  placeholder="Type location: MayPallet1, A3, Stack8, Stack D3"
+                />
+
+                {locationSearch && (
+                  <div className="location-summary">
+                    {locationItems.length === 0 ? (
+                      <p>No items found for this location.</p>
+                    ) : (
+                      <>
+                        <h4>{locationSearch}</h4>
+
+                        <p>
+                          <strong>{locationSearch}</strong> has{" "}
+                          <strong>{locationStackEntries.length}</strong>{" "}
+                          stack/location group(s).
+                        </p>
+
+                        <table className="mini-summary-table">
+                          <thead>
+                            <tr>
+                              <th>Stack / Side / Group</th>
+                              <th>Quantity</th>
+                            </tr>
+                          </thead>
+
+                          <tbody>
+                            {locationStackEntries.map(
+                              ([stackName, quantity]) => (
+                                <tr key={stackName}>
+                                  <td>{stackName}</td>
+                                  <td>{quantity}</td>
+                                </tr>
+                              ),
+                            )}
+
+                            <tr className="summary-total-row">
+                              <td>Total Items</td>
+                              <td>{locationTotalQuantity}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+
+                        <div className="location-model-breakdown">
+                          <h4>Model Breakdown</h4>
+
+                          {locationModelEntries.map(([modelName, quantity]) => (
+                            <div
+                              key={modelName}
+                              className="model-breakdown-row"
+                            >
+                              <span>{modelName}</span>
+                              <strong>{quantity}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <br />
         <strong>Count by Area:</strong>{" "}
@@ -1130,6 +1307,46 @@ Please review photos carefully for condition and included items.
           </span>
         ))}
       </div>
+      {syncResults.length > 0 && (
+        <div className="sync-results-card">
+          <div className="sync-results-header">
+            <h3>eBay Sync Results</h3>
+
+            <button type="button" onClick={() => setSyncResults([])}>
+              Clear Results
+            </button>
+          </div>
+
+          {syncResults.map((result, index) => (
+            <div
+              key={`${result.ebayItemId}-${index}`}
+              className={
+                result.matched
+                  ? "sync-result matched"
+                  : result.needsReview
+                    ? "sync-result needs-review"
+                    : "sync-result unmatched"
+              }
+            >
+              <strong>{result.title}</strong>
+
+              <div>eBay Item ID: {result.ebayItemId}</div>
+
+              <div>
+                Status:{" "}
+                {result.matched
+                  ? "Matched"
+                  : result.needsReview
+                    ? "Needs Review"
+                    : "No Match"}
+              </div>
+
+              <div>{result.message}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="listing-filter-bar">
         <button
           type="button"
